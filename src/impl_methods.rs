@@ -16,6 +16,7 @@ use crate::imp_prelude::*;
 
 use crate::{arraytraits, DimMax};
 use crate::argument_traits::AssignElem;
+use crate::data_traits::IfOwnedCb;
 use crate::dimension;
 use crate::dimension::IntoDimension;
 use crate::dimension::{
@@ -1646,18 +1647,7 @@ where
         }
         let layout = self.layout_impl();
         if order == Order::Automatic {
-            // the order of the conditionals is significant for preference
-            if layout.is(Layout::CORDER) {
-                order = Order::RowMajor;
-            } else if layout.is(Layout::FORDER) {
-                order = Order::ColumnMajor;
-            } else if layout.is(Layout::CPREFER) {
-                order = Order::RowMajor;
-            } else if layout.is(Layout::FPREFER) {
-                order = Order::ColumnMajor;
-            } else {
-                order = Order::RowMajor;
-            }
+            order = preferred_order_for_layout(layout);
         }
 
         unsafe {
@@ -1682,23 +1672,91 @@ where
         }
     }
 
-    /// Transform the array into `shape`; any shape with the same number of
-    /// elements is accepted, but the source array or view must be in standard
-    /// or column-major (Fortran) layout.
+    /// Transform the array into `shape`; any shape with the same number of elements is accepted,
+    /// but the source array or view must be in contiguous and stored in standard row-major (C) or
+    /// column-major (Fortran) memory order.
     ///
-    /// **Errors** if the shapes don't have the same number of elements.<br>
-    /// **Errors** if the input array is not c- or f-contiguous.
+    /// **Warning:** this method will automatically decide which ordering (row-major or
+    /// column-major) to use for rearranging the elements. Use `as_shape` if more
+    /// control is needed. Note that one-dimensional contiguous arrays will be regarded
+    /// as row major.
+    ///
+    /// **Errors** if the new shape doesn't have the same number of elements as the array's current
+    /// shape.<br>
+    /// **Errors** if the input array is not C- or F-contiguous.
     ///
     /// ```
-    /// use ndarray::{aview1, aview2};
+    /// use ndarray::array;
     ///
     /// assert!(
-    ///     aview1(&[1., 2., 3., 4.]).into_shape((2, 2)).unwrap()
-    ///     == aview2(&[[1., 2.],
-    ///                 [3., 4.]])
+    ///     array![1., 2., 3., 4.].coerce_shape_c((2, 2)).unwrap()
+    ///     == array![[1., 2.],
+    ///               [3., 4.]]
     /// );
     /// ```
-    pub fn into_shape<E>(self, shape: E) -> Result<ArrayBase<S, E::Dim>, ShapeError>
+    #[deprecated(note="Replaced by one of `to_shape`, `coerce_shape_c`, `coerce_shape_f` \
+                 and `into_shape_owned`.", since="0.15.0")]
+    pub fn into_shape_<E>(self, shape: E) -> Result<ArrayBase<S, E::Dim>, ShapeError>
+    where
+        E: IntoDimension,
+    {
+        self.coerce_shape_with_order(shape, Order::Automatic)
+    }
+
+    /// Transform the array into `shape`; any shape with the same number of elements is accepted,
+    /// but the source array or view must be contiguous and stored in standard row-major (C) memory
+    /// order.
+    ///
+    /// This method allows any array, view or raw view and never copies elements.
+    ///
+    /// **Errors** if the new shape doesn't have the same number of elements as the array's current
+    /// shape.<br>
+    /// **Errors** if the input array is not C-contiguous.
+    ///
+    /// ```
+    /// use ndarray::array;
+    ///
+    /// assert!(
+    ///     array![1., 2., 3., 4.].coerce_shape_c((2, 2)).unwrap()
+    ///     == array![[1., 2.],
+    ///               [3., 4.]]
+    /// );
+    /// ```
+    pub fn coerce_shape_c<E>(self, shape: E) -> Result<ArrayBase<S, E::Dim>, ShapeError>
+    where
+        E: IntoDimension,
+    {
+        self.coerce_shape_with_order(shape, Order::RowMajor)
+    }
+
+    /// Transform the array into `shape`; any shape with the same number of elements is accepted,
+    /// but the source array or view must be contiguous and stored in column-major (F) memory
+    /// order.
+    ///
+    /// This method allows any array, view or raw view and never copies elements.
+    ///
+    /// **Errors** if the new shape doesn't have the same number of elements as the array's current
+    /// shape.<br>
+    /// **Errors** if the input array is not F-contiguous.
+    ///
+    /// ```
+    /// use ndarray::array;
+    ///
+    /// assert!(
+    ///     array![1., 2., 3., 4.].coerce_shape_f((2, 2)).unwrap()
+    ///     == array![[1., 3.],
+    ///               [2., 4.]]
+    /// );
+    /// ```
+    pub fn coerce_shape_f<E>(self, shape: E) -> Result<ArrayBase<S, E::Dim>, ShapeError>
+    where
+        E: IntoDimension,
+    {
+        self.coerce_shape_with_order(shape, Order::ColumnMajor)
+    }
+
+    fn coerce_shape_with_order<E>(self, shape: E, mut order: Order)
+        -> Result<ArrayBase<S, E::Dim>, ShapeError>
     where
         E: IntoDimension,
     {
@@ -1706,15 +1764,87 @@ where
         if size_of_shape_checked(&shape) != Ok(self.dim.size()) {
             return Err(error::incompatible_shapes(&self.dim, &shape));
         }
-        // Check if contiguous, if not => copy all, else just adapt strides
+
+        let layout = self.layout_impl();
+        if order == Order::Automatic {
+            order = preferred_order_for_layout(layout);
+        }
+
+        // safe because: the number of elements is preserved and it's contiguous
         unsafe {
-            // safe because arrays are contiguous and len is unchanged
-            if self.is_standard_layout() {
+            if layout.is(Layout::CORDER) && order == Order::RowMajor {
                 Ok(self.with_strides_dim(shape.default_strides(), shape))
-            } else if self.ndim() > 1 && self.raw_view().reversed_axes().is_standard_layout() {
+            } else if layout.is(Layout::FORDER) && order == Order::ColumnMajor {
                 Ok(self.with_strides_dim(shape.fortran_strides(), shape))
             } else {
                 Err(error::from_kind(error::ErrorKind::IncompatibleLayout))
+            }
+        }
+    }
+
+    /// Transform the array into `new_shape`; any shape with the same number of elements is
+    /// accepted.
+    ///
+    /// `order` specifies the *logical* order in which the array is to be read and reshaped.  The
+    /// input array must be an owned array. It is updated and returned if possible, otherwise
+    /// elements are copied to be rearranged for the new shape and the new array returned.
+    ///
+    /// **Panics** if shapes are incompatible.
+    ///
+    /// **Errors** if the new shape doesn't have the same number of elements as the array's current
+    /// shape.
+    ///
+    /// ```
+    /// use ndarray::array;
+    /// use ndarray::Order;
+    ///
+    /// assert!(
+    ///     array![1., 2., 3., 4., 5., 6.].into_shape((2, 3)).unwrap()
+    ///     == array![[1., 2., 3.],
+    ///               [4., 5., 6.]]
+    /// );
+    ///
+    /// assert!(
+    ///     array![1., 2., 3., 4., 5., 6.].into_shape(((2, 3), Order::ColumnMajor)).unwrap()
+    ///     == array![[1., 3., 5.],
+    ///               [2., 4., 6.]]
+    /// );
+    /// ```
+    pub fn into_shape<E>(self, new_shape: E) -> Result<ArrayBase<S, E::Dim>, ShapeError>
+    where
+        E: ShapeArg<StrideType = Contiguous>,
+    {
+        let (new_shape, order) = new_shape.into_shape_and_order(Order::RowMajor);
+        self.into_shape_order(new_shape, order)
+    }
+
+    fn into_shape_order<E>(self, shape: E, mut order: Order)
+        -> Result<ArrayBase<S, E>, ShapeError>
+    where
+        E: Dimension,
+    {
+        if size_of_shape_checked(&shape) != Ok(self.dim.size()) {
+            return Err(error::incompatible_shapes(&self.dim, &shape));
+        }
+
+        let layout = self.layout_impl();
+        if order == Order::Automatic {
+            order = preferred_order_for_layout(layout);
+        }
+
+        // safe because: the number of elements is preserved and it's contiguous
+        unsafe {
+            if layout.is(Layout::CORDER) && order == Order::RowMajor {
+                Ok(self.with_strides_dim(shape.default_strides(), shape))
+            } else if layout.is(Layout::FORDER) && order == Order::ColumnMajor {
+                Ok(self.with_strides_dim(shape.fortran_strides(), shape))
+            } else {
+                // Try to adapt shape as `Array` if applicable
+                if let Some(res) = S::map_if_owned(self, IntoShapeOwnedCb { order, shape }) {
+                    res
+                } else {
+                    Err(error::from_kind(error::ErrorKind::IncompatibleLayout))
+                }
             }
         }
     }
@@ -2651,7 +2781,6 @@ where
     }
 }
 
-
 /// Transmute from A to B.
 ///
 /// Like transmute, but does not have the compile-time size check which blocks
@@ -2667,3 +2796,58 @@ unsafe fn unlimited_transmute<A, B>(data: A) -> B {
 }
 
 type DimMaxOf<A, B> = <A as DimMax<B>>::Output;
+
+#[inline]
+fn preferred_order_for_layout(layout: Layout) -> Order {
+    // the order of the conditionals is significant for preference
+    if layout.is(Layout::CORDER) {
+        Order::RowMajor
+    } else if layout.is(Layout::FORDER) {
+        Order::ColumnMajor
+    } else if layout.is(Layout::CPREFER) {
+        Order::RowMajor
+    } else if layout.is(Layout::FPREFER) {
+        Order::ColumnMajor
+    } else {
+        Order::RowMajor
+    }
+}
+
+struct IntoShapeOwnedCb<E> {
+    order: Order,
+    shape: E,
+}
+
+impl<S, D, E> IfOwnedCb<S, D> for IntoShapeOwnedCb<E>
+where
+    S: RawData,
+    D: Dimension,
+    E: Dimension,
+{
+    type Output = Result<ArrayBase<S, E>, ShapeError>;
+    fn cb(self, array: Array<S::Elem, D>) -> Self::Output
+    where
+        S: DataOwned,
+        D: Dimension,
+    {
+        let shape = self.shape;
+        let order = self.order;
+
+        unsafe {
+            let (iter, shape) = match order {
+                Order::RowMajor => {
+                    let iter = array.into_iter();
+                    (iter, shape.set_f(false))
+                }
+                Order::ColumnMajor => {
+                    let iter = array.reversed_axes().into_iter();
+                    (iter, shape.set_f(true))
+                },
+                /* order automatic ruled out */
+                Order::Automatic => unreachable!(),
+            };
+            Ok(ArrayBase::from_shape_trusted_iter_unchecked(
+                        shape, iter, |x| x))
+        }
+    }
+}
