@@ -1625,6 +1625,9 @@ where
     ///
     /// **Panics** if shapes are incompatible.
     ///
+    /// *This method is obsolete, because it is inflexible in how logical order
+    /// of the array is handled. See [`ArrayBase::as_shape`].*
+    ///
     /// ```
     /// use ndarray::{rcarr1, rcarr2};
     ///
@@ -1634,6 +1637,7 @@ where
     ///                 [3., 4.]])
     /// );
     /// ```
+    #[deprecated(note="Obsolete, use `as_shape` or `into_shape` instead.", since="0.15.0")]
     pub fn reshape<E>(&self, shape: E) -> ArrayBase<S, E::Dim>
     where
         S: DataShared + DataOwned,
