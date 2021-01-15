@@ -29,6 +29,7 @@ use crate::indices;
 #[cfg(feature = "std")]
 use crate::iterators::to_vec;
 use crate::iterators::to_vec_mapped;
+use crate::iterators::TrustedIterator;
 use crate::StrideShape;
 #[cfg(feature = "std")]
 use crate::{geomspace, linspace, logspace};
@@ -451,6 +452,20 @@ where
         }
         let strides = shape.strides.strides_for_dim(&dim);
         unsafe { Ok(Self::from_vec_dim_stride_unchecked(dim, strides, v)) }
+    }
+
+    pub(crate) unsafe fn from_shape_trusted_iter_unchecked<Sh, I, F>(shape: Sh, iter: I, map: F)
+        -> Self
+    where
+        Sh: Into<StrideShape<D>>,
+        I: TrustedIterator + ExactSizeIterator,
+        F: FnMut(I::Item) -> A,
+    {
+        let shape = shape.into();
+        let dim = shape.dim;
+        let strides = shape.strides.strides_for_dim(&dim);
+        let v = to_vec_mapped(iter, map);
+        Self::from_vec_dim_stride_unchecked(dim, strides, v)
     }
 
     /// Creates an array from a vector and interpret it according to the
