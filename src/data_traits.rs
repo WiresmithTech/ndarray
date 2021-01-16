@@ -35,7 +35,35 @@ pub unsafe trait RawData: Sized {
     // This method is only used for debugging
     fn _data_slice(&self) -> Option<&[Self::Elem]>;
 
+    /// If `Self` is convertible to OwnedRepr, call the callback with self and pass the return
+    /// value; else return `None`.
+    #[doc(hidden)]
+    fn map_if_owned<D: Dimension, C>(_array: ArrayBase<Self, D>, _cb: C) -> Option<C::Output>
+    where
+        C: IfOwnedCb<Self, D>
+    {
+        None
+    }
+
+    #[doc(hidden)]
+    fn try_into_owned<D>(self_: ArrayBase<Self, D>)
+        -> Result<ArrayBase<OwnedRepr<Self::Elem>, D>, ArrayBase<Self, D>>
+    where
+        D: Dimension
+    {
+        Err(self_)
+    }
+
     private_decl! {}
+}
+
+/// Helper trait that represents a "generic callback", in a way that closures can't.
+pub trait IfOwnedCb<S: RawData, D> {
+    type Output;
+    fn cb(self, array: ArrayBase<OwnedRepr<S::Elem>, D>) -> Self::Output
+    where
+        S: DataOwned,
+        D: Dimension;
 }
 
 /// Array representation trait.
@@ -192,6 +220,35 @@ unsafe impl<A> RawData for OwnedArcRepr<A> {
     fn _data_slice(&self) -> Option<&[A]> {
         Some(self.0.as_slice())
     }
+
+    fn map_if_owned<D: Dimension, C>(array: ArrayBase<Self, D>, _cb: C) -> Option<C::Output>
+    where
+        C: IfOwnedCb<Self, D>
+    {
+        Self::try_into_owned(array).ok().map(|array| _cb.cb(array))
+    }
+
+    #[doc(hidden)]
+    fn try_into_owned<D>(self_: ArrayBase<Self, D>)
+        -> Result<ArrayBase<OwnedRepr<Self::Elem>, D>, ArrayBase<Self, D>>
+    where
+        D: Dimension
+    {
+        match Arc::try_unwrap(self_.data.0) {
+            Ok(data) => Ok(ArrayBase {
+                data,
+                ptr: self_.ptr,
+                dim: self_.dim,
+                strides: self_.strides,
+            }),
+            Err(data) => Err(ArrayBase {
+                data: OwnedArcRepr(data),
+                ptr: self_.ptr,
+                dim: self_.dim,
+                strides: self_.strides,
+            }),
+        }
+    }
     private_impl! {}
 }
 
@@ -275,6 +332,22 @@ unsafe impl<A> RawData for OwnedRepr<A> {
     type Elem = A;
     fn _data_slice(&self) -> Option<&[A]> {
         Some(self.as_slice())
+    }
+
+    fn map_if_owned<D: Dimension, C>(array: ArrayBase<Self, D>, _cb: C) -> Option<C::Output>
+    where
+        C: IfOwnedCb<Self, D>
+    {
+        Some(_cb.cb(array))
+    }
+
+    #[doc(hidden)]
+    fn try_into_owned<D>(self_: ArrayBase<Self, D>)
+        -> Result<ArrayBase<OwnedRepr<Self::Elem>, D>, ArrayBase<Self, D>>
+    where
+        D: Dimension
+    {
+        Ok(self_)
     }
     private_impl! {}
 }
@@ -463,6 +536,30 @@ unsafe impl<'a, A> RawData for CowRepr<'a, A> {
             CowRepr::Owned(data) => data._data_slice(),
         }
     }
+
+    fn try_into_owned<D>(self_: ArrayBase<Self, D>)
+        -> Result<ArrayBase<OwnedRepr<Self::Elem>, D>, ArrayBase<Self, D>>
+    where
+        D: Dimension
+    {
+        match self_.data {
+            data @ CowRepr::View(_) => Err(
+                ArrayBase {
+                    data,
+                    ptr: self_.ptr,
+                    dim: self_.dim,
+                    strides: self_.strides,
+                }),
+            CowRepr::Owned(data) => Ok(
+                ArrayBase {
+                    data,
+                    ptr: self_.ptr,
+                    dim: self_.dim,
+                    strides: self_.strides,
+                }),
+        }
+    }
+
     private_impl! {}
 }
 
