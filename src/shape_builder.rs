@@ -13,7 +13,7 @@ pub struct Shape<D> {
 }
 
 #[derive(Copy, Clone, Debug)]
-pub(crate) enum Contiguous {}
+pub enum Contiguous {}
 
 impl<D> Shape<D> {
     pub(crate) fn is_c(&self) -> bool {
@@ -44,7 +44,7 @@ where
 
 /// Stride description
 #[derive(Copy, Clone, Debug)]
-pub(crate) enum Strides<D> {
+pub enum Strides<D> {
     /// Row-major ("C"-order)
     C,
     /// Column-major ("F"-order)
@@ -182,5 +182,65 @@ where
     /// Return the size of the shape in number of elements
     pub fn size(&self) -> usize {
         self.dim.size()
+    }
+}
+
+
+use crate::order::Order;
+
+pub trait ShapeArg {
+    type Dim: Dimension;
+    type StrideType;
+
+    fn into_shape_and_order(self, default: Order) -> (Self::Dim, Order);
+    fn into_shape_and_strides(self, default: Order) -> (Self::Dim, Strides<Self::StrideType>);
+}
+
+impl<T> ShapeArg for T where T: IntoDimension {
+    type Dim = T::Dim;
+    type StrideType = Contiguous;
+
+    fn into_shape_and_order(self, default: Order) -> (Self::Dim, Order) {
+        (self.into_dimension(), default)
+    }
+
+    fn into_shape_and_strides(self, _default: Order) -> (Self::Dim, Strides<Contiguous>) {
+        unimplemented!()
+    }
+}
+
+impl<T> ShapeArg for (T, Order) where T: IntoDimension {
+    type Dim = T::Dim;
+    type StrideType = Contiguous;
+
+    fn into_shape_and_order(self, _default: Order) -> (Self::Dim, Order) {
+        (self.0.into_dimension(), self.1)
+    }
+
+    fn into_shape_and_strides(self, _default: Order) -> (Self::Dim, Strides<Contiguous>) {
+        unimplemented!()
+    }
+}
+
+/// Custom strides
+#[derive(Copy, Clone, Debug)]
+pub struct CustomStrides<D> { strides: D }
+
+// newtype constructor without public field
+#[allow(non_snake_case)]
+pub fn CustomStrides<T>(strides: T) -> CustomStrides<T> {
+    CustomStrides { strides }
+}
+
+impl<T> ShapeArg for (T, CustomStrides<T>) where T: IntoDimension {
+    type Dim = T::Dim;
+    type StrideType = T::Dim;
+
+    fn into_shape_and_order(self, _default: Order) -> (Self::Dim, Order) {
+        (self.0.into_dimension(), _default)
+    }
+
+    fn into_shape_and_strides(self, _default: Order) -> (Self::Dim, Strides<T::Dim>) {
+        (self.0.into_dimension(), Strides::Custom(self.1.strides.into_dimension()))
     }
 }
