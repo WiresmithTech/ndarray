@@ -1642,14 +1642,8 @@ where
         A: Clone,
         S: Data,
     {
-        if size_of_shape_checked(&shape) != Ok(self.dim.size()) {
-            return Err(error::incompatible_shapes(&self.dim, &shape));
-        }
-        let layout = self.layout_impl();
-        if order == Order::Automatic {
-            order = preferred_order_for_layout(layout);
-        }
-
+        let layout = self.layout_and_order(&shape, &mut order)?;
+        // safe because: the number of elements is preserved and it's contiguous
         unsafe {
             if layout.is(Layout::CORDER) && order == Order::RowMajor {
                 let strides = shape.default_strides();
@@ -1670,6 +1664,24 @@ where
                             shape, view.into_iter(), A::clone)))
             }
         }
+    }
+
+    /// Check if `shape` is valid for reshaping the array (in terms of number of elements),
+    /// and also compute the Layout of self and resolve Order if it is Automatic.
+    ///
+    /// After returning successfully, `order` is either RowMajor or ColumnMajor.
+    fn layout_and_order<E>(&self, shape: &E, order: &mut Order) -> Result<Layout, ShapeError>
+    where
+        E: Dimension,
+    {
+        if size_of_shape_checked(shape) != Ok(self.dim.size()) {
+            return Err(error::incompatible_shapes(&self.dim, shape));
+        }
+        let layout = self.layout_impl();
+        if *order == Order::Automatic {
+            *order = preferred_order_for_layout(layout);
+        }
+        Ok(layout)
     }
 
     /// Transform the array into `shape`; any shape with the same number of elements is accepted,
@@ -1707,15 +1719,7 @@ where
     where
         E: Dimension,
     {
-        if size_of_shape_checked(&shape) != Ok(self.dim.size()) {
-            return Err(error::incompatible_shapes(&self.dim, &shape));
-        }
-
-        let layout = self.layout_impl();
-        if order == Order::Automatic {
-            order = preferred_order_for_layout(layout);
-        }
-
+        let layout = self.layout_and_order(&shape, &mut order)?;
         // safe because: the number of elements is preserved and it's contiguous
         unsafe {
             if layout.is(Layout::CORDER) && order == Order::RowMajor {
@@ -1769,15 +1773,7 @@ where
     where
         E: Dimension,
     {
-        if size_of_shape_checked(&shape) != Ok(self.dim.size()) {
-            return Err(error::incompatible_shapes(&self.dim, &shape));
-        }
-
-        let layout = self.layout_impl();
-        if order == Order::Automatic {
-            order = preferred_order_for_layout(layout);
-        }
-
+        let layout = self.layout_and_order(&shape, &mut order)?;
         // safe because: the number of elements is preserved and it's contiguous
         unsafe {
             if layout.is(Layout::CORDER) && order == Order::RowMajor {
