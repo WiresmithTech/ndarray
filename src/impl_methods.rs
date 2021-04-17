@@ -1689,78 +1689,24 @@ where
     /// use ndarray::array;
     ///
     /// assert!(
-    ///     array![1., 2., 3., 4.].coerce_shape_c((2, 2)).unwrap()
+    ///     array![1., 2., 3., 4.].coerce_shape((2, 2)).unwrap()
     ///     == array![[1., 2.],
     ///               [3., 4.]]
     /// );
     /// ```
-    #[deprecated(note="Replaced by one of `to_shape`, `coerce_shape_c`, `coerce_shape_f` \
-                 and `into_shape_owned`.", since="0.15.0")]
-    pub fn into_shape_<E>(self, shape: E) -> Result<ArrayBase<S, E::Dim>, ShapeError>
+    pub fn coerce_shape<E>(self, shape: E) -> Result<ArrayBase<S, E::Dim>, ShapeError>
     where
-        E: IntoDimension,
+        E: ShapeArg<StrideType = Contiguous>,
     {
-        self.coerce_shape_with_order(shape, Order::Automatic)
+        let (shape, order) = shape.into_shape_and_order(Order::RowMajor);
+        self.coerce_shape_order(shape, order)
     }
 
-    /// Transform the array into `shape`; any shape with the same number of elements is accepted,
-    /// but the source array or view must be contiguous and stored in standard row-major (C) memory
-    /// order.
-    ///
-    /// This method allows any array, view or raw view and never copies elements.
-    ///
-    /// **Errors** if the new shape doesn't have the same number of elements as the array's current
-    /// shape.<br>
-    /// **Errors** if the input array is not C-contiguous.
-    ///
-    /// ```
-    /// use ndarray::array;
-    ///
-    /// assert!(
-    ///     array![1., 2., 3., 4.].coerce_shape_c((2, 2)).unwrap()
-    ///     == array![[1., 2.],
-    ///               [3., 4.]]
-    /// );
-    /// ```
-    pub fn coerce_shape_c<E>(self, shape: E) -> Result<ArrayBase<S, E::Dim>, ShapeError>
+    fn coerce_shape_order<E>(self, shape: E, mut order: Order)
+        -> Result<ArrayBase<S, E>, ShapeError>
     where
-        E: IntoDimension,
+        E: Dimension,
     {
-        self.coerce_shape_with_order(shape, Order::RowMajor)
-    }
-
-    /// Transform the array into `shape`; any shape with the same number of elements is accepted,
-    /// but the source array or view must be contiguous and stored in column-major (F) memory
-    /// order.
-    ///
-    /// This method allows any array, view or raw view and never copies elements.
-    ///
-    /// **Errors** if the new shape doesn't have the same number of elements as the array's current
-    /// shape.<br>
-    /// **Errors** if the input array is not F-contiguous.
-    ///
-    /// ```
-    /// use ndarray::array;
-    ///
-    /// assert!(
-    ///     array![1., 2., 3., 4.].coerce_shape_f((2, 2)).unwrap()
-    ///     == array![[1., 3.],
-    ///               [2., 4.]]
-    /// );
-    /// ```
-    pub fn coerce_shape_f<E>(self, shape: E) -> Result<ArrayBase<S, E::Dim>, ShapeError>
-    where
-        E: IntoDimension,
-    {
-        self.coerce_shape_with_order(shape, Order::ColumnMajor)
-    }
-
-    fn coerce_shape_with_order<E>(self, shape: E, mut order: Order)
-        -> Result<ArrayBase<S, E::Dim>, ShapeError>
-    where
-        E: IntoDimension,
-    {
-        let shape = shape.into_dimension();
         if size_of_shape_checked(&shape) != Ok(self.dim.size()) {
             return Err(error::incompatible_shapes(&self.dim, &shape));
         }
