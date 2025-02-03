@@ -19,6 +19,7 @@
 //!   * [Mathematics](#mathematics)
 //!   * [Array manipulation](#array-manipulation)
 //!   * [Iteration](#iteration)
+//!   * [Type conversions](#type-conversions)
 //!   * [Convenience methods for 2-D arrays](#convenience-methods-for-2-d-arrays)
 //!
 //! # Similarities
@@ -110,7 +111,7 @@
 //! When slicing in `ndarray`, the axis is first sliced with `start..end`. Then if
 //! `step` is positive, the first index is the front of the slice; if `step` is
 //! negative, the first index is the back of the slice. This means that the
-//! behavior is the same as NumPy except when `step < -1`. See the docs for the
+//! behavior is different from NumPy when `step < 0`. See the docs for the
 //! [`s![]` macro][s!] for more details.
 //!
 //! </td>
@@ -245,8 +246,8 @@
 //!   methods [`.slice_mut()`][.slice_mut()], [`.slice_move()`][.slice_move()], and
 //!   [`.slice_collapse()`][.slice_collapse()].
 //!
-//! * The behavior of slicing is slightly different from NumPy for slices with
-//!   `step < -1`. See the docs for the [`s![]` macro][s!] for more details.
+//! * The behavior of slicing is different from NumPy for slices with
+//!   `step < 0`. See the docs for the [`s![]` macro][s!] for more details.
 //!
 //! NumPy | `ndarray` | Notes
 //! ------|-----------|------
@@ -257,6 +258,7 @@
 //! `a[-5:]` or `a[-5:, :]` | [`a.slice(s![-5.., ..])`][.slice()] or [`a.slice_axis(Axis(0), Slice::from(-5..))`][.slice_axis()] | get the last 5 rows of a 2-D array
 //! `a[:3, 4:9]` | [`a.slice(s![..3, 4..9])`][.slice()] | columns 4, 5, 6, 7, and 8 of the first 3 rows
 //! `a[1:4:2, ::-1]` | [`a.slice(s![1..4;2, ..;-1])`][.slice()] | rows 1 and 3 with the columns in reverse order
+//! `a.take([4, 2])` | `a.select(Axis(0), &[4, 2])` | rows 4 and 2 of the array
 //!
 //! ## Shape and strides
 //!
@@ -530,6 +532,8 @@
 //! ------|-----------|------
 //! `a[:] = 3.` | [`a.fill(3.)`][.fill()] | set all array elements to the same scalar value
 //! `a[:] = b` | [`a.assign(&b)`][.assign()] | copy the data from array `b` into array `a`
+//! `a[:5, 2] = 3.` | [`a.slice_mut(s![..5, 2]).fill(3.)`][.fill()] | set a portion of the array to the same scalar value
+//! `a[:5, 2] = b` | [`a.slice_mut(s![..5, 2]).assign(&b)`][.assign()] | copy the data from array `b` into part of array `a`
 //! `np.concatenate((a,b), axis=1)` | [`concatenate![Axis(1), a, b]`][concatenate!] or [`concatenate(Axis(1), &[a.view(), b.view()])`][concatenate()] | concatenate arrays `a` and `b` along axis 1
 //! `np.stack((a,b), axis=1)` | [`stack![Axis(1), a, b]`][stack!] or [`stack(Axis(1), vec![a.view(), b.view()])`][stack()] | stack arrays `a` and `b` along axis 1
 //! `a[:,np.newaxis]` or `np.expand_dims(a, axis=1)` | [`a.slice(s![.., NewAxis])`][.slice()] or [`a.insert_axis(Axis(1))`][.insert_axis()] | create an view of 1-D array `a`, inserting a new axis 1
@@ -560,6 +564,102 @@
 //! `np.ndenumerate(a)` | [`a.indexed_iter()`][.indexed_iter()] | flat iterator yielding the index along with each element reference
 //! `iter(a)` | [`a.outer_iter()`][.outer_iter()] or [`a.axis_iter(Axis(0))`][.axis_iter()] | iterator over the first (outermost) axis, yielding each subview
 //!
+//! ## Type conversions
+//!
+//! In `ndarray`, conversions between datatypes are done with `mapv()` by
+//! passing a closure to convert every element independently.
+//! For the conversion itself, we have several options:
+//! - `std::convert::From` ensures lossless, safe conversions at compile-time
+//!   and is generally recommended.
+//! - `std::convert::TryFrom` can be used for potentially unsafe conversions. It
+//!   will return a `Result` which can be handled or `unwrap()`ed to panic if
+//!   any value at runtime cannot be converted losslessly.
+//! - The `as` keyword compiles to lossless/lossy conversions depending on the
+//!   source and target datatypes. It can be useful when `TryFrom` is a
+//!   performance issue or does not apply. A notable difference to NumPy is that
+//!   `as` performs a [*saturating* cast][sat_conv] when casting
+//!   from floats to integers. Further information can be found in the
+//!   [reference on type cast expressions][as_typecast].
+//!
+//! For details, be sure to check out the type conversion examples.
+//!
+
+//! <table>
+//! <tr><th>
+//!
+//! NumPy
+//!
+//! </th><th>
+//!
+//! `ndarray`
+//!
+//! </th><th>
+//!
+//! Notes
+//!
+//! </th></tr>
+//!
+//! <tr><td>
+//!
+//! `a.astype(np.float32)`
+//!
+//! </td><td>
+//!
+//! `a.mapv(f32::from)`
+//!
+//! </td><td>
+//!
+//! convert `u8` array infallibly to `f32` array with `std::convert::From`, generally recommended
+//!
+//! </td></tr>
+//!
+//! <tr><td>
+//!
+//! `a.astype(np.int32)`
+//!
+//! </td><td>
+//!
+//! `a.mapv(i32::from)`
+//!
+//! </td><td>
+//!
+//! upcast `u8` array to `i32` array with `std::convert::From`, preferable over `as` because it ensures at compile-time that the conversion is lossless
+//!
+//! </td></tr>
+//!
+//! <tr><td>
+//!
+//! `a.astype(np.uint8)`
+//!
+//! </td><td>
+//!
+//! `a.mapv(|x| u8::try_from(x).unwrap())`
+//!
+//! </td><td>
+//!
+//! try to convert `i8` array to `u8` array, panic if any value cannot be converted lossless at runtime (e.g. negative value)
+//!
+//! </td></tr>
+//!
+//! <tr><td>
+//!
+//! `a.astype(np.int32)`
+//!
+//! </td><td>
+//!
+//! `a.mapv(|x| x as i32)`
+//!
+//! </td><td>
+//!
+//! convert `f32` array to `i32` array with ["saturating" conversion][sat_conv]; care needed because it can be a lossy conversion or result in non-finite values! See [the reference for information][as_typecast].
+//!
+//! </td></tr>
+//! </table>
+//!
+//! [as_conv]: https://doc.rust-lang.org/rust-by-example/types/cast.html
+//! [sat_conv]: https://blog.rust-lang.org/2020/07/16/Rust-1.45.0.html#fixing-unsoundness-in-casts
+//! [as_typecast]: https://doc.rust-lang.org/reference/expressions/operator-expr.html#type-cast-expressions
+//!
 //! ## Convenience methods for 2-D arrays
 //!
 //! NumPy | `ndarray` | Notes
@@ -577,6 +677,8 @@
 //! [.column()]: ArrayBase::column
 //! [.column_mut()]: ArrayBase::column_mut
 //! [concatenate()]: crate::concatenate()
+//! [concatenate!]: crate::concatenate!
+//! [stack!]: crate::stack!
 //! [::default()]: ArrayBase::default
 //! [.diag()]: ArrayBase::diag
 //! [.dim()]: ArrayBase::dim

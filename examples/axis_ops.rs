@@ -1,8 +1,5 @@
 #![allow(
-    clippy::many_single_char_names,
-    clippy::deref_addrof,
-    clippy::unreadable_literal,
-    clippy::many_single_char_names
+    clippy::many_single_char_names, clippy::deref_addrof, clippy::unreadable_literal, clippy::many_single_char_names
 )]
 
 use ndarray::prelude::*;
@@ -11,7 +8,7 @@ use ndarray::prelude::*;
 /// make sure axes are in positive stride direction, and merge adjacent
 /// axes if possible.
 ///
-/// This changes the logical order of the elments in the
+/// This changes the logical order of the elements in the
 /// array, so that if we read them in row-major order after regularization,
 /// it corresponds to their order in memory.
 ///
@@ -58,7 +55,8 @@ where
     Ok(())
 }
 
-fn main() {
+fn main()
+{
     let mut a = Array::<u8, _>::zeros((2, 3, 4));
     for (i, elt) in (0..).zip(&mut a) {
         *elt = i;
@@ -74,7 +72,7 @@ fn main() {
     }
     regularize(&mut b).unwrap();
 
-    let mut b = b.into_shape(a.len()).unwrap();
+    let mut b = b.into_shape_with_order(a.len()).unwrap();
     regularize(&mut b).unwrap();
 
     b.invert_axis(Axis(0));

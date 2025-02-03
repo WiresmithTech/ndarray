@@ -1,5 +1,7 @@
 #[cfg(feature = "approx")]
-mod approx_methods {
+#[cfg_attr(docsrs, doc(cfg(feature = "approx")))]
+mod approx_methods
+{
     use crate::imp_prelude::*;
 
     impl<A, S, D> ArrayBase<S, D>
@@ -9,8 +11,6 @@ mod approx_methods {
     {
         /// A test for equality that uses the elementwise absolute difference to compute the
         /// approximate equality of two arrays.
-        ///
-        /// **Requires crate feature `"approx"`**
         pub fn abs_diff_eq<S2>(&self, other: &ArrayBase<S2, D>, epsilon: A::Epsilon) -> bool
         where
             A: ::approx::AbsDiffEq<S2::Elem>,
@@ -22,14 +22,7 @@ mod approx_methods {
 
         /// A test for equality that uses an elementwise relative comparison if the values are far
         /// apart; and the absolute difference otherwise.
-        ///
-        /// **Requires crate feature `"approx"`**
-        pub fn relative_eq<S2>(
-            &self,
-            other: &ArrayBase<S2, D>,
-            epsilon: A::Epsilon,
-            max_relative: A::Epsilon,
-        ) -> bool
+        pub fn relative_eq<S2>(&self, other: &ArrayBase<S2, D>, epsilon: A::Epsilon, max_relative: A::Epsilon) -> bool
         where
             A: ::approx::RelativeEq<S2::Elem>,
             A::Epsilon: Clone,
@@ -196,7 +189,5 @@ macro_rules! impl_approx_traits {
 }
 
 #[cfg(feature = "approx")]
+#[cfg_attr(docsrs, doc(cfg(feature = "approx")))]
 impl_approx_traits!(approx, "**Requires crate feature `\"approx\"`.**");
-
-#[cfg(feature = "approx-0_5")]
-impl_approx_traits!(approx_0_5, "**Requires crate feature `\"approx-0_5\"`.**");
